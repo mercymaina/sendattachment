@@ -1,41 +1,94 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/csv"
 	"fmt"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/jordan-wright/email"
 	"net/smtp"
+	"os"
+	"time"
+	_ "time"
 )
 
-// smtpServer data to smtp server
-type smtpServer struct {
-	host string
-	port string
-}
+var yesterday = time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 
-// Address URI to smtp server
-func (s *smtpServer) Address() string {
-	return s.host + ":" + s.port
-}
 func main() {
-	// Sender data.
-	from := "mercymaina@infinitytechafrica.com"
-	password := "you google app password."
 
-	// Receiver email address.
-	to := []string{
-		"mercymaina567@gmail.com",
-		"aliphonzanderitu@gmail.com",
-	}
-
-	message := []byte("This is a really unimaginative message, I know.")
-	// Authentication.
-
-	auth := smtp.PlainAuth(" ", from, password, "smtp.gmail.com")
-	// Sending email.
-
-	err := smtp.SendMail("smtp.gmail.com:587", auth, from, to, message)
+	err := getCsv()
 	if err != nil {
-		fmt.Printf("Errror sending email %s", err)
-		return
+		fmt.Printf("Get csv returned an error %s", err)
 	}
-	fmt.Println("Email Sent!")
+
+	e := email.NewEmail()
+	password := "My app Password"
+	from := "mercymaina@infinitytechafrica.com"
+	e.From = "Infinity Tech <mercymaina@infinitytechafrica.com>"
+	e.To = []string{"mercymaina567@gmail.com"}
+
+	e.Subject = "MO Reports"
+	e.HTML = []byte("<h1>Find attached MO report</h1>")
+	file := yesterday + ".csv"
+	e.AttachFile(file)
+	e.Send("smtp.gmail.com:587", smtp.PlainAuth("", from, password, "smtp.gmail.com"))
+
+}
+func getCsv() error {
+	db, err := sql.Open("mysql", "ucm:4rfvBHU*@tcp(44.239.52.145:3306)/ucm")
+	if err != nil {
+		// Handle error
+	}
+	defer db.Close()
+	err = db.Ping()
+	if err != nil {
+		fmt.Printf("Cant connect %s", err)
+	}
+	fmt.Printf("Ping successful ")
+
+	query := fmt.Sprintf("SELECT org_id, network, mnc, mcc, cc, msisdn, flow, src_address, created_on FROM ucm.tbl_campaign_messages WHERE src_address='40023' AND DATE(created_on)='%s' AND flow='MO' LIMIT 100000", yesterday)
+	rows, err := db.Query(query)
+	//rows, err := db.Query("SELECT org_id,network,mnc,mcc,cc, msisdn,flow,src_address,created_on FROM ucm.tbl_campaign_messages where src_address=\"40023\" and date(created_on)=%s and flow =\"MO\" limit 100000", time.Now().AddDate(0, 0, -1).Format("2023-06-10"))
+	if err != nil {
+		// Handle error
+		fmt.Printf("Error selecting %s", err)
+	}
+	fmt.Printf("select successful")
+	defer rows.Close()
+	//create csv file using encoding/csv
+	filename := yesterday + ".csv"
+	file, err := os.Create(filename)
+	if err != nil {
+		// Handle error
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// Write header to the CSV file
+	header := []string{"org_id", "network", "MNC", "MCC", "cc", "msisdn", "flow", "src_address", "created_on"}
+	writer.Write(header)
+	// Iterate over the result set
+	for rows.Next() {
+		// Process each row
+		var org_id, network, mnc, mcc, cc, msisdn, flow, src_address, created_on string
+		err := rows.Scan(&org_id, &network, &mnc, &mcc, &cc, &msisdn, &flow, &src_address, &created_on)
+		if err != nil {
+			// Handle error
+		}
+		row := []string{org_id, network, mnc, mcc, cc, msisdn, flow, src_address, created_on}
+		writer.Write(row)
+	}
+	//
+	if err := rows.Err(); err != nil {
+		// Handle error
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		// Handle error
+	}
+
+	return nil
 }
